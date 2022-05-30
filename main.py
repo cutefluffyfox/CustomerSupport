@@ -2,8 +2,6 @@ import logging
 import asyncio
 from os import getenv
 from datetime import datetime, timedelta
-from random import randint
-import pprint
 
 import dotenv
 from aiogram import Bot, Dispatcher, executor
@@ -35,6 +33,8 @@ CHANNEL_ID = getenv("CHANNEL_ID")
 # Check that critical variables are defined
 if BOT_TOKEN is None:
     logging.critical('No BOT_TOKEN variable found in project environment')
+if CHANNEL_ID is None:
+    logging.critical('No CHANNEL_ID variable found in project environment')
 
 
 # Initialize bot and dispatcher
@@ -60,11 +60,55 @@ async def team_new_member(member: ChatMemberUpdated):
         )
 
 
-@dp.callback_query_handler(lambda c: c.data.startswith('deleteMessage'))
+@dp.callback_query_handler(lambda c: c.data == 'deleteMessage')
 async def delete_message(callback_query: CallbackQuery):
     chat_id = callback_query.message.chat.id
     message_id = callback_query.message.message_id
     await bot.delete_message(chat_id, message_id)
+
+
+# TODO: DELETE
+@dp.message_handler(commands=['ask'])
+async def send_question(message: Message):
+    question_id = message.message_id
+    text = f'Question #{question_id}\n\n{message.text.lstrip("/ask ")}'
+    markup = generators.generate_inline_markup({'text': '✅ Answer the question', 'callback_data': 'answerQuestion'})
+    await bot.send_message(CHANNEL_ID, text, reply_markup=markup)
+
+
+@dp.callback_query_handler(lambda c: c.data == 'answerQuestion')
+async def answer_question(callback_query: CallbackQuery):
+    chat_id = callback_query.message.chat.id
+    user_id = callback_query.from_user.id
+    message_id = callback_query.message.message_id
+
+    question_text = callback_query.message.text
+    question_text = question_text[question_text.find('\n'):].strip()
+
+    channel_markup = generators.generate_inline_markup({'text': '⌛ In progress', 'callback_data': 'inProgress'})
+    user_markup = generators.generate_inline_markup({'text': '❌ Cancel', 'callback_data': f'cancelAnswer,{message_id}'})
+    await bot.edit_message_reply_markup(chat_id, message_id, reply_markup=channel_markup)
+    await bot.send_message(
+        user_id,
+        f'Please provide answer to the question bellow:\n\n{question_text}',
+        reply_markup=user_markup
+    )
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith('cancelAnswer'))
+async def cancel_answer(callback_query: CallbackQuery):
+    channel_message_id = int(callback_query.data.split(',')[1])
+    message_id = callback_query.message.message_id
+    user_id = callback_query.from_user.id
+
+    markup = generators.generate_inline_markup({'text': '✅ Answer the question', 'callback_data': 'answerQuestion'})
+    await bot.edit_message_reply_markup(CHANNEL_ID, channel_message_id, reply_markup=markup)
+    await bot.edit_message_text('Answer canceled successfully', user_id, message_id)
+
+
+@dp.callback_query_handler(lambda c: c.data == 'inProgress')
+async def cancel_answer(callback_query: CallbackQuery):
+    await callback_query.answer('Question is already taken', show_alert=True)
 
 
 if __name__ == '__main__':

@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Test files not important for projects
+sandbox.py
+
+# Logs
+logs.log

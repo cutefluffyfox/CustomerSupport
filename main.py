@@ -6,10 +6,8 @@ from datetime import datetime, timedelta
 import dotenv
 from aiogram import Bot, Dispatcher, executor
 from aiogram.types import Message, CallbackQuery, ContentType
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.types.reply_keyboard import ReplyKeyboardRemove
 from aiogram.types.chat_member_updated import ChatMemberUpdated
+import aiogram.utils.exceptions as exceptions
 
 from TelegramBot import filters
 from TelegramBot import generators
@@ -42,8 +40,17 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 
+@dp.message_handler(commands=['start'])
+async def start(message: Message):
+    await message.answer(
+        "Hello! I am volunteer helper bot. "
+        "My goal is to help managing open (non-answered) questions.\n"
+        "To begin, join volunteer's chat and choose any question to answer"
+    )
+
+
 @dp.my_chat_member_handler(filters.is_new_channel_member)
-async def team_new_member(member: ChatMemberUpdated):
+async def new_member_bot(member: ChatMemberUpdated):
     channel_id = member.chat.id
     if member.new_chat_member.user.id == bot.id:
         message = await bot.send_message(
@@ -72,7 +79,10 @@ async def delete_message(callback_query: CallbackQuery):
 async def send_question(message: Message):
     question_id = message.message_id
     text = f'Question #{question_id}\n\n{message.text.lstrip("/ask ")}'
-    markup = generators.generate_inline_markup({'text': '✅ Answer the question', 'callback_data': 'answerQuestion'})
+    markup = generators.generate_inline_markup({
+        'text': '✅ Answer the question',
+        'callback_data': 'answerQuestion'
+    })
     await bot.send_message(CHANNEL_ID, text, reply_markup=markup)
 
 
@@ -85,14 +95,19 @@ async def answer_question(callback_query: CallbackQuery):
     question_text = callback_query.message.text
     question_text = question_text[question_text.find('\n'):].strip()
 
-    channel_markup = generators.generate_inline_markup({'text': '⌛ In progress', 'callback_data': 'inProgress'})
-    user_markup = generators.generate_inline_markup({'text': '❌ Cancel', 'callback_data': f'cancelAnswer,{message_id}'})
-    await bot.edit_message_reply_markup(chat_id, message_id, reply_markup=channel_markup)
-    await bot.send_message(
-        user_id,
-        f'Please provide answer to the question bellow:\n\n{question_text}',
-        reply_markup=user_markup
-    )
+    try:
+        user_markup = generators.generate_inline_markup({'text': '❌ Cancel', 'callback_data': f'cancelAnswer,{message_id}'})
+        await bot.send_message(
+            user_id,
+            f'Please provide answer to the question bellow:\n\n{question_text}',
+            reply_markup=user_markup
+        )
+    except (exceptions.CantInitiateConversation, exceptions.BotBlocked) as e:
+        url = f't.me/{(await bot.get_me()).username}?start=start'
+        await callback_query.answer('Please start conversation with a bot', url=url)
+    else:
+        channel_markup = generators.generate_inline_markup({'text': '⌛ In progress', 'callback_data': 'inProgress'})
+        await bot.edit_message_reply_markup(chat_id, message_id, reply_markup=channel_markup)
 
 
 @dp.callback_query_handler(lambda c: c.data.startswith('cancelAnswer'))
@@ -108,7 +123,7 @@ async def cancel_answer(callback_query: CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == 'inProgress')
 async def cancel_answer(callback_query: CallbackQuery):
-    await callback_query.answer('Question is already taken', show_alert=True)
+    await callback_query.answer('Question is already taken')
 
 
 if __name__ == '__main__':
